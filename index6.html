@@ -1,0 +1,1890 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width,initial-scale=1.0">
+
+<title>Cosmic Particle Clock</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Great+Vibes&display=swap" rel="stylesheet">
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+}
+
+html,
+body{
+
+width:100%;
+height:100%;
+
+overflow:hidden;
+
+background:
+radial-gradient(circle at center,
+#151515 0%,
+#080808 45%,
+#000000 100%);
+
+font-family:Arial,sans-serif;
+
+}
+
+#container{
+
+position:relative;
+
+width:100%;
+height:100%;
+
+display:flex;
+justify-content:center;
+align-items:center;
+flex-direction:column;
+
+}
+
+#title{
+
+position:absolute;
+
+top:8px;
+
+width:100%;
+
+text-align:center;
+
+font-family:'Cinzel',serif;
+
+font-weight:900;
+
+letter-spacing:4px;
+
+font-size:
+clamp(16px,2.5vw,40px);
+
+color:white;
+
+z-index:5;
+
+user-select:none;
+
+}
+
+#subtitle{
+
+position:absolute;
+
+top:52px;
+
+width:100%;
+
+text-align:center;
+
+font-size:
+clamp(10px,1vw,15px);
+
+letter-spacing:8px;
+
+color:#cccccc;
+
+z-index:5;
+
+user-select:none;
+
+}
+
+#clockWrapper{
+
+position:relative;
+
+width:
+min(82vw,80vh);
+
+height:
+min(82vw,80vh);
+
+min-width:270px;
+min-height:270px;
+
+max-width:760px;
+max-height:760px;
+
+z-index:1;
+
+}
+
+canvas{
+
+position:absolute;
+
+inset:0;
+
+width:100%;
+height:100%;
+
+display:block;
+
+}
+
+#signature{
+
+position:absolute;
+
+bottom:6px;
+
+width:100%;
+
+text-align:center;
+
+font-family:
+'Great Vibes',
+cursive;
+
+font-size:
+clamp(20px,2.5vw,40px);
+
+color:white;
+
+opacity:.85;
+
+z-index:5;
+
+user-select:none;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="container">
+
+<div id="title">
+
+COSMIC PARTICLE CLOCK
+
+</div>
+
+<div id="subtitle">
+
+TIME IN MOTION
+
+</div>
+
+<div id="clockWrapper">
+
+<canvas id="canvas"></canvas>
+
+</div>
+
+<div id="signature">
+
+Azmat Ali
+
+</div>
+
+</div>
+
+<script>
+
+const canvas=
+document.getElementById("canvas");
+
+const ctx=
+canvas.getContext("2d");
+
+let width;
+let height;
+
+let cx;
+let cy;
+
+let radius;
+
+function resize(){
+
+const rect=
+canvas.getBoundingClientRect();
+
+canvas.width=rect.width;
+canvas.height=rect.height;
+
+width=canvas.width;
+height=canvas.height;
+
+cx=width/2;
+cy=height/2;
+
+radius=
+Math.min(width,height)/2-20;
+
+}
+
+window.addEventListener(
+"resize",
+resize
+);
+
+requestAnimationFrame(() => {
+    resize();
+    createParticles();
+    drawClockFace();
+    animate();
+});
+// ======================================================
+// COLORS
+// ======================================================
+
+const WHITE="#ffffff";
+
+const ORANGE="#ff6633";
+
+const GLOW="rgba(255,255,255,.25)";
+
+
+// ======================================================
+// DRAW OUTER RING
+// ======================================================
+
+function drawOuterRing(){
+
+ctx.save();
+
+ctx.beginPath();
+
+ctx.arc(
+cx,
+cy,
+radius,
+0,
+Math.PI*2
+);
+
+ctx.lineWidth=
+Math.max(
+2,
+radius*0.012
+);
+
+ctx.strokeStyle=WHITE;
+
+ctx.stroke();
+
+ctx.restore();
+
+}
+
+
+// ======================================================
+// INNER GLOW RING
+// ======================================================
+
+function drawInnerRing(){
+
+ctx.save();
+
+ctx.beginPath();
+
+ctx.arc(
+cx,
+cy,
+radius-14,
+0,
+Math.PI*2
+);
+
+ctx.lineWidth=2;
+
+ctx.strokeStyle=
+"rgba(255,255,255,.15)";
+
+ctx.stroke();
+
+ctx.restore();
+
+}
+
+
+// ======================================================
+// CLOCK NUMBERS
+// ======================================================
+
+function drawNumbers(){
+
+ctx.save();
+
+ctx.fillStyle="#ffdd00";
+
+ctx.textAlign="center";
+
+ctx.textBaseline="middle";
+
+ctx.font=
+"900 "
++
+Math.floor(radius*0.155)
++
+"px Arial";
+
+const numberRadius=
+radius*0.88;
+
+for(
+let i=1;
+i<=12;
+i++
+){
+
+const angle=
+(i-3)
+*
+Math.PI
+/
+6;
+
+const x=
+cx+
+Math.cos(angle)
+*
+numberRadius;
+
+const y=
+cy+
+Math.sin(angle)
+*
+numberRadius;
+
+ctx.fillText(
+i,
+x,
+y
+);
+
+}
+
+ctx.restore();
+
+}
+
+
+// ======================================================
+// CENTER HUB
+// ======================================================
+
+function drawCenterHub(){
+
+ctx.save();
+
+ctx.beginPath();
+
+ctx.arc(
+cx,
+cy,
+radius*0.03,
+0,
+Math.PI*2
+);
+
+ctx.fillStyle="#ffdd00";
+
+ctx.fill();
+
+ctx.restore();
+
+}
+
+
+// ======================================================
+// STATIC CLOCK FACE
+// ======================================================
+
+function drawClockFace(){
+
+drawOuterRing();
+
+drawInnerRing();
+
+drawNumbers();
+
+drawCenterHub();
+
+}
+// ======================================================
+// DRAW A SINGLE HAND
+// ======================================================
+
+function drawHand(angle,length,width,color){
+
+    ctx.save();
+
+    ctx.translate(cx,cy);
+
+    ctx.rotate(angle-Math.PI/2);
+
+    ctx.beginPath();
+
+    ctx.moveTo(-radius*0.08,0);
+
+    ctx.lineTo(length,0);
+
+    ctx.lineWidth=width;
+
+    ctx.lineCap="round";
+
+    ctx.strokeStyle=color;
+
+    ctx.stroke();
+
+    ctx.restore();
+
+}
+
+
+// ======================================================
+// CURRENT TIME
+// ======================================================
+
+function drawClockHands(){
+
+    const now=new Date();
+
+    const ms=now.getMilliseconds()/1000;
+
+    const seconds=now.getSeconds()+ms;
+
+    const minutes=now.getMinutes()+seconds/60;
+
+    const hours=(now.getHours()%12)+minutes/60;
+
+
+    const secondAngle=
+        seconds*Math.PI/30;
+
+    const minuteAngle=
+        minutes*Math.PI/30;
+
+    const hourAngle=
+        hours*Math.PI/6;
+
+
+    // Hour Hand
+
+    drawHand(
+
+        hourAngle,
+
+        radius*0.46,
+
+        Math.max(5,radius*0.018),
+
+        "#4488ff"
+
+    );
+
+
+    // Minute Hand
+
+    drawHand(
+
+        minuteAngle,
+
+        radius*0.66,
+
+        Math.max(3,radius*0.010),
+
+        "#4488ff"
+
+    );
+
+
+    // Second Hand
+
+    drawHand(
+
+        secondAngle,
+
+        radius*0.82,
+
+        Math.max(2,radius*0.004),
+
+        "#ff5533"
+
+    );
+
+
+    // Center Cap
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.arc(
+
+        cx,
+
+        cy,
+
+        radius*0.03,
+
+        0,
+
+        Math.PI*2
+
+    );
+
+    ctx.fillStyle="#ffffff";
+
+    ctx.fill();
+
+    ctx.restore();
+
+}
+// ======================================================
+// PARTICLE ENGINE
+// ======================================================
+
+const particles=[];
+
+const PARTICLE_COUNT=4000;
+const RING_COUNT=20;
+const RING_PARTICLES_MIN=14;
+const RING_PARTICLES_MAX=70;
+
+
+// ======================================================
+// CREATE PARTICLES in concentric rings
+// ======================================================
+
+function createParticles(){
+
+    particles.length=0;
+
+    for(let r=0;r<RING_COUNT;r++){
+
+        const ringRadius=(r/(RING_COUNT-1))*(radius*0.94)+radius*0.03;
+        const count=Math.floor(RING_PARTICLES_MIN+(r/(RING_COUNT-1))*(RING_PARTICLES_MAX-RING_PARTICLES_MIN));
+        const phase=r*0.08;
+
+        for(let p=0;p<count;p++){
+
+            const angle=(p/count)*Math.PI*2+phase;
+            const px=cx+Math.cos(angle)*ringRadius;
+            const py=cy+Math.sin(angle)*ringRadius;
+
+            particles.push({
+
+                x:px,
+                y:py,
+
+                homeX:px,
+                homeY:py,
+
+                vx:0,
+                vy:0,
+
+                size:0.25+Math.random()*0.75,
+
+                alpha:0.18+Math.random()*0.35,
+
+                speed:0.3+Math.random()*0.9,
+
+                noise:Math.random()*1000,
+
+                angle:Math.random()*Math.PI*2,
+
+                homeRadius:ringRadius,
+
+                homeAngle:angle
+
+            });
+
+        }
+
+    }
+
+    assignParticleTypes();
+
+}
+
+function assignParticleTypes() {
+    for(const p of particles){
+        if(p.type===undefined){
+
+            const r=Math.random();
+
+            if(r<0.15){
+
+                p.type="fast";
+
+            }else if(r<0.35){
+
+                p.type="slow";
+
+            }else if(r<0.55){
+
+                p.type="heavy";
+
+            }else{
+
+                p.type="normal";
+
+            }
+
+        }
+    }
+}
+
+// ======================================================
+// REBUILD WHEN WINDOW RESIZES
+// ======================================================
+
+window.addEventListener("resize",()=>{
+
+    resize();
+
+    createParticles();
+
+});
+
+
+// ======================================================
+// FLOW ANIMATION
+// ======================================================
+
+let flowTime = 0;
+
+
+// ======================================================
+// UPDATE PARTICLES
+// ======================================================
+
+function updateParticles(){
+
+    flowTime += 0.004;
+
+    for(let i=0;i<particles.length;i++){
+
+        const p=particles[i];
+
+        // orbital wobble around home position (gentle)
+        const orbitAngle=flowTime*0.8+p.noise*0.3;
+        const wobbleX=Math.sin(orbitAngle)*0.2*p.speed;
+        const wobbleY=Math.cos(orbitAngle*1.3)*0.2*p.speed;
+
+        // chaotic drift
+        const driftX=Math.sin(flowTime*2.1+p.noise)*0.15*p.speed;
+        const driftY=Math.cos(flowTime*1.7+p.noise*1.4)*0.15*p.speed;
+
+        // micro-jitter
+        const jitterX=(Math.random()-0.5)*0.08;
+        const jitterY=(Math.random()-0.5)*0.08;
+
+        p.vx+=wobbleX+driftX+jitterX;
+        p.vy+=wobbleY+driftY+jitterY;
+
+        // spring back to home
+        p.vx+=(p.homeX-p.x)*0.02;
+        p.vy+=(p.homeY-p.y)*0.02;
+
+        // damping
+        p.vx*=0.92;
+        p.vy*=0.92;
+
+        p.x+=p.vx;
+        p.y+=p.vy;
+
+        // hard clip to clock interior
+        const dx=p.x-cx;
+        const dy=p.y-cy;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const maxDist=radius-6;
+
+        if(dist>maxDist){
+            const nx=dx/dist;
+            const ny=dy/dist;
+            p.x=cx+nx*maxDist;
+            p.y=cy+ny*maxDist;
+            p.vx*=-0.5;
+            p.vy*=-0.5;
+        }
+    }
+
+}
+// ======================================================
+// MOUSE
+// ======================================================
+
+const mouse = {
+
+    x: -10000,
+    y: -10000,
+
+    active: false
+
+};
+
+
+// ======================================================
+// TRACK MOUSE
+// ======================================================
+
+canvas.addEventListener("mousemove",(e)=>{
+
+    const rect = canvas.getBoundingClientRect();
+
+    mouse.x =
+        (e.clientX-rect.left) *
+        (canvas.width/rect.width);
+
+    mouse.y =
+        (e.clientY-rect.top) *
+        (canvas.height/rect.height);
+
+    mouse.active = true;
+
+});
+
+
+canvas.addEventListener("mouseleave",()=>{
+
+    mouse.active = false;
+
+});
+
+
+// ======================================================
+// APPLY MOUSE FORCE
+// ======================================================
+
+function applyMouseForce(){
+
+    if(!mouse.active) return;
+
+    const influence =
+        radius * 0.22;
+
+    for(const p of particles){
+
+        const dx = p.x - mouse.x;
+        const dy = p.y - mouse.y;
+
+        const dist =
+            Math.sqrt(dx*dx + dy*dy);
+
+        if(dist < influence){
+
+            const power =
+                (1-dist/influence);
+
+            const nx =
+                dx/(dist+0.001);
+
+            const ny =
+                dy/(dist+0.001);
+
+            // Push particles away
+            p.vx +=
+                nx *
+                power *
+                1.5;
+
+            p.vy +=
+                ny *
+                power *
+                1.5;
+
+            // Add swirling motion
+            p.vx +=
+                -ny *
+                power *
+                0.35;
+
+            p.vy +=
+                nx *
+                power *
+                0.35;
+
+        }
+
+    }
+
+}
+// ======================================================
+// BACKGROUND GLOW
+// ======================================================
+
+function drawBackgroundGlow(){
+
+    const g = ctx.createRadialGradient(
+
+        cx,
+        cy,
+        radius*0.15,
+
+        cx,
+        cy,
+        radius
+
+    );
+
+    g.addColorStop(
+        0,
+        "rgba(255,255,255,0.06)"
+    );
+
+    g.addColorStop(
+        0.55,
+        "rgba(255,255,255,0.02)"
+    );
+
+    g.addColorStop(
+        1,
+        "rgba(255,255,255,0)"
+    );
+
+    ctx.fillStyle = g;
+
+    ctx.beginPath();
+
+    ctx.arc(
+        cx,
+        cy,
+        radius,
+        0,
+        Math.PI*2
+    );
+
+    ctx.fill();
+
+}
+
+
+
+// ======================================================
+// PARTICLE TRAILS
+// ======================================================
+
+function drawParticleTrails(){
+
+    ctx.save();
+
+    ctx.lineCap="round";
+
+    for(const p of particles){
+
+        const speed =
+            Math.sqrt(
+                p.vx*p.vx+
+                p.vy*p.vy
+            );
+
+        if(speed<0.08)
+            continue;
+
+        ctx.beginPath();
+
+        ctx.strokeStyle=
+            "rgba(255,255,255,"
+            +(p.alpha*0.18)+")";
+
+        ctx.lineWidth=
+            p.size*0.9;
+
+        ctx.moveTo(
+
+            p.x-p.vx*12,
+
+            p.y-p.vy*12
+
+        );
+
+        ctx.lineTo(
+
+            p.x,
+
+            p.y
+
+        );
+
+        ctx.stroke();
+
+    }
+
+    ctx.restore();
+
+}
+
+
+
+// ======================================================
+// SOFT COSMIC FOG
+// ======================================================
+
+let cosmicTime = 0;
+
+function updateCosmicParticles() {
+    cosmicTime += 0.005;
+}
+
+function drawCosmicFog(){
+
+    ctx.save();
+
+    ctx.globalCompositeOperation="lighter";
+
+    for(let i=0;i<7;i++){
+
+        const a=
+            cosmicTime*0.2+
+            i;
+
+        const x=
+            cx+
+            Math.cos(a)*radius*0.25;
+
+        const y=
+            cy+
+            Math.sin(a*1.2)*radius*0.25;
+
+        const grad=
+            ctx.createRadialGradient(
+
+                x,
+                y,
+                0,
+
+                x,
+                y,
+                radius*0.35
+
+            );
+
+        grad.addColorStop(
+            0,
+            "rgba(255,255,255,0.018)"
+        );
+
+        grad.addColorStop(
+            1,
+            "rgba(255,255,255,0)"
+        );
+
+        ctx.fillStyle=grad;
+
+        ctx.beginPath();
+
+        ctx.arc(
+
+            x,
+
+            y,
+
+            radius*0.35,
+
+            0,
+
+            Math.PI*2
+
+        );
+
+        ctx.fill();
+
+    }
+
+    ctx.restore();
+
+}
+// ======================================================
+// VORTEX SYSTEM
+// ======================================================
+
+const vortices = [];
+
+function createVortices(){
+
+    vortices.length = 0;
+
+    for(let i=0;i<6;i++){
+
+        const angle = Math.random()*Math.PI*2;
+
+        const dist = radius*(0.15+Math.random()*0.45);
+
+        vortices.push({
+
+            x: cx + Math.cos(angle)*dist,
+
+            y: cy + Math.sin(angle)*dist,
+
+            radius: 60 + Math.random()*70,
+
+            strength: 0.15 + Math.random()*0.35,
+
+            direction: Math.random()<0.5 ? -1 : 1,
+
+            phase: Math.random()*Math.PI*2
+
+        });
+
+    }
+
+}
+
+createVortices();
+
+
+// ======================================================
+// TURBULENCE
+// ======================================================
+
+let breathe = 0;
+
+function applyTurbulence(){
+
+    breathe += 0.01;
+
+    const breathing =
+        0.5 +
+        0.5 *
+        Math.sin(breathe);
+
+    for(const p of particles){
+
+        // ---------- breathing ----------
+
+        p.vx +=
+            (p.homeX-p.x) *
+            breathing *
+            0.0006;
+
+        p.vy +=
+            (p.homeY-p.y) *
+            breathing *
+            0.0006;
+
+
+        // ---------- vortices ----------
+
+        for(const v of vortices){
+
+            const dx =
+                p.x-v.x;
+
+            const dy =
+                p.y-v.y;
+
+            const d =
+                Math.sqrt(dx*dx+dy*dy);
+
+            if(d<v.radius){
+
+                const power =
+                    (1-d/v.radius) *
+                    v.strength;
+
+                const tx =
+                    (-dy/d) *
+                    power *
+                    v.direction;
+
+                const ty =
+                    ( dx/d) *
+                    power *
+                    v.direction;
+
+                p.vx += tx;
+
+                p.vy += ty;
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+// ======================================================
+// MOVE VORTICES
+// ======================================================
+
+function updateVortices(){
+
+    let i=0;
+
+    for(const v of vortices){
+
+        v.phase +=
+            0.002 +
+            i*0.0003;
+
+        v.x =
+            cx +
+            Math.cos(v.phase) *
+            radius *
+            0.30;
+
+        v.y =
+            cy +
+            Math.sin(v.phase*1.35) *
+            radius *
+            0.30;
+
+        i++;
+
+    }
+
+}
+// ======================================================
+// PARTICLE CONNECTIONS
+// ======================================================
+
+function drawConnections(){
+
+    ctx.save();
+
+    ctx.lineWidth = 0.4;
+
+    // Skip some particles for performance
+    for(let i=0;i<particles.length;i+=4){
+
+        const p1 = particles[i];
+
+        for(let j=i+4;j<particles.length;j+=4){
+
+            const p2 = particles[j];
+
+            const dx = p2.x-p1.x;
+            const dy = p2.y-p1.y;
+
+            const dist =
+                Math.sqrt(dx*dx+dy*dy);
+
+            if(dist<18){
+
+                const alpha =
+                    (1-dist/18)*0.18;
+
+                ctx.strokeStyle =
+                    "rgba(255,255,255,"+
+                    alpha+")";
+
+                ctx.beginPath();
+
+                ctx.moveTo(
+                    p1.x,
+                    p1.y
+                );
+
+                ctx.lineTo(
+                    p2.x,
+                    p2.y
+                );
+
+                ctx.stroke();
+
+            }
+
+        }
+
+    }
+
+    ctx.restore();
+
+}
+
+
+
+// ======================================================
+// ENERGY WAVES
+// ======================================================
+
+let waveTime = 0;
+
+function drawEnergyWave(){
+
+    waveTime += 0.01;
+
+    ctx.save();
+
+    ctx.lineWidth = 2;
+
+    for(let k=0;k<3;k++){
+
+        const rr =
+
+            radius *
+
+            (
+                0.30+
+                k*0.18+
+                Math.sin(
+                    waveTime+k
+                )*0.02
+            );
+
+        ctx.beginPath();
+
+        ctx.arc(
+
+            cx,
+
+            cy,
+
+            rr,
+
+            0,
+
+            Math.PI*2
+
+        );
+
+        ctx.strokeStyle=
+
+        "rgba(255,255,255,0.05)";
+
+        ctx.stroke();
+
+    }
+
+    ctx.restore();
+
+}
+// ======================================================
+// SHOOTING STARS
+// ======================================================
+
+const shootingStars=[];
+
+function createShootingStar(){
+
+    shootingStars.push({
+
+        angle:Math.random()*Math.PI*2,
+
+        radius:Math.random()*radius*0.7,
+
+        life:100,
+
+        speed:3+Math.random()*2,
+
+        size:1+Math.random()*2
+
+    });
+
+}
+
+setInterval(()=>{
+
+    if(shootingStars.length<6){
+
+        createShootingStar();
+
+    }
+
+},1200);
+
+
+// ======================================================
+// UPDATE SHOOTING STARS
+// ======================================================
+
+function updateShootingStars(){
+
+    for(let i=shootingStars.length-1;i>=0;i--){
+
+        const s=shootingStars[i];
+
+        s.radius+=s.speed;
+
+        s.life--;
+
+        if(s.life<=0 || s.radius>radius){
+
+            shootingStars.splice(i,1);
+
+        }
+
+    }
+
+}
+
+
+
+// ======================================================
+// DRAW SHOOTING STARS
+// ======================================================
+
+function drawShootingStars(){
+
+    ctx.save();
+
+    ctx.lineCap="round";
+
+    for(const s of shootingStars){
+
+        const x=
+            cx+
+            Math.cos(s.angle)*s.radius;
+
+        const y=
+            cy+
+            Math.sin(s.angle)*s.radius;
+
+        const tx=
+            Math.cos(s.angle);
+
+        const ty=
+            Math.sin(s.angle);
+
+        ctx.beginPath();
+
+        ctx.strokeStyle=
+        "rgba(255,255,255,0.45)";
+
+        ctx.lineWidth=s.size;
+
+        ctx.moveTo(
+
+            x-tx*18,
+
+            y-ty*18
+
+        );
+
+        ctx.lineTo(
+
+            x,
+
+            y
+
+        );
+
+        ctx.stroke();
+
+    }
+
+    ctx.restore();
+
+}
+
+
+
+// ======================================================
+// RANDOM SPARKLES
+// ======================================================
+
+let sparkleTime=0;
+
+function drawSparkles(){
+
+    sparkleTime+=0.03;
+
+    ctx.save();
+
+    for(let i=0;i<20;i++){
+
+        const a=
+            sparkleTime+i;
+
+        const r=
+            radius*
+            (0.15+0.75*Math.random());
+
+        const x=
+            cx+
+            Math.cos(a*2.4+i)*r;
+
+        const y=
+            cy+
+            Math.sin(a*1.8+i)*r;
+
+        const alpha=
+            0.2+
+            0.8*
+            Math.abs(
+                Math.sin(a*3+i)
+            );
+
+        ctx.globalAlpha=alpha;
+
+        ctx.beginPath();
+
+        ctx.arc(
+
+            x,
+
+            y,
+
+            1.2,
+
+            0,
+
+            Math.PI*2
+
+        );
+
+        ctx.fillStyle="#ffffff";
+
+        ctx.fill();
+
+    }
+
+    ctx.restore();
+
+}
+
+
+
+// ======================================================
+// MOUSE TILT
+// ======================================================
+
+let tiltX=0;
+let tiltY=0;
+
+window.addEventListener("mousemove",(e)=>{
+
+    const rx=
+        e.clientX/
+        window.innerWidth;
+
+    const ry=
+        e.clientY/
+        window.innerHeight;
+
+    tiltY=
+        (rx-.5)*8;
+
+    tiltX=
+        (.5-ry)*8;
+
+});
+
+
+
+function applyCanvasTilt(){
+
+    if (tiltX === 0 && tiltY === 0) return;
+
+    const wrapper = document.getElementById('clockWrapper');
+    wrapper.style.transform =
+
+    `perspective(1200px)
+
+    rotateX(${tiltX}deg)
+
+    rotateY(${tiltY}deg)
+
+    scale(1.01)`;
+
+}
+
+
+
+// ======================================================
+// PREMIUM BLOOM
+// ======================================================
+
+function drawBloom(){
+
+    const bloom=
+
+    ctx.createRadialGradient(
+
+        cx,
+        cy,
+        radius*0.05,
+
+        cx,
+        cy,
+        radius*0.95
+
+    );
+
+    bloom.addColorStop(
+
+        0,
+
+        "rgba(255,255,255,0.08)"
+
+    );
+
+    bloom.addColorStop(
+
+        .45,
+
+        "rgba(255,255,255,0.025)"
+
+    );
+
+    bloom.addColorStop(
+
+        1,
+
+        "rgba(255,255,255,0)"
+
+    );
+
+    ctx.fillStyle=bloom;
+
+    ctx.beginPath();
+
+    ctx.arc(
+
+        cx,
+
+        cy,
+
+        radius,
+
+        0,
+
+        Math.PI*2
+
+    );
+
+    ctx.fill();
+
+}
+// ======================================================
+// MAIN RENDER LOOP
+// ======================================================
+
+function animate(){
+
+    requestAnimationFrame(animate);
+
+    // ----- Smooth fade for motion blur / trails -----
+
+    ctx.fillStyle="rgba(0,0,0,0.10)";
+
+    ctx.fillRect(
+
+        0,
+
+        0,
+
+        width,
+
+        height
+
+    );
+
+
+
+    // ----- Update Simulation -----
+
+    updateVortices();
+
+    applyTurbulence();
+
+    updateParticles();
+
+    updateCosmicParticles();
+
+    updateParticlePersonality();
+
+    particlePulse();
+
+    applyMouseForce();
+
+    updateShootingStars();
+
+    // ----- Draw Scene -----
+
+    drawBackgroundGlow();
+
+    drawBloom();
+
+    drawCosmicFog();
+
+    drawEnergyWave();
+
+    drawParticleTrails();
+
+    drawConnections();
+
+    drawParticlesPremium();
+
+    drawSparkles();
+
+    drawShootingStars();
+
+    drawOuterRing();
+
+    drawInnerRing();
+
+    drawNumbers();
+
+    drawClockHands();
+
+    drawFinalGlow();
+
+    applyCanvasTilt();
+
+}
+// ======================================================
+// PARTICLE PERSONALITY UPDATE
+// ======================================================
+
+function updateParticlePersonality(){
+
+    for(const p of particles){
+
+        switch(p.type){
+
+            case "fast":
+
+                p.vx*=1.015;
+                p.vy*=1.015;
+
+                break;
+
+            case "slow":
+
+                p.vx*=0.995;
+                p.vy*=0.995;
+
+                break;
+
+            case "heavy":
+
+                p.vx*=0.985;
+                p.vy*=0.985;
+
+                break;
+
+            default:
+
+                break;
+
+        }
+
+    }
+
+}
+
+
+
+// ======================================================
+// SOFT RANDOM PULSES
+// ======================================================
+
+let pulseTime=0;
+
+function particlePulse(){
+
+    pulseTime+=0.015;
+
+    const pulse=
+
+        0.5+
+
+        Math.sin(pulseTime)*0.5;
+
+    for(const p of particles){
+
+        p.alpha=
+
+        0.12+
+
+        pulse*0.35+
+
+        Math.sin(
+
+            pulseTime+
+
+            p.noise
+
+        )*0.10;
+
+    }
+
+}
+
+
+
+// ======================================================
+// PREMIUM PARTICLE DRAWING
+// ======================================================
+
+function drawParticlesPremium(){
+
+    ctx.save();
+
+    for(const p of particles){
+
+        ctx.globalAlpha=
+
+            Math.max(
+
+                0.08,
+
+                Math.min(
+
+                    1,
+
+                    p.alpha
+
+                )
+
+            );
+
+        let color="#ffffff";
+
+        if(p.type==="fast"){
+
+            color="#fefefe";
+
+        }
+
+        if(p.type==="heavy"){
+
+            color="#dddddd";
+
+        }
+
+        ctx.fillStyle=color;
+
+        ctx.beginPath();
+
+        ctx.arc(
+
+            p.x,
+
+            p.y,
+
+            p.size,
+
+            0,
+
+            Math.PI*2
+
+        );
+
+        ctx.fill();
+
+    }
+
+    ctx.restore();
+
+}
+// ======================================================
+// AUTO QUALITY
+// ======================================================
+
+function autoQuality(){
+
+    const size=Math.min(window.innerWidth,window.innerHeight);
+
+    if(size<420){
+
+        canvas.style.filter="brightness(1)";
+
+    }else if(size<900){
+
+        canvas.style.filter="brightness(1.08)";
+
+    }else{
+
+        canvas.style.filter="brightness(1.15)";
+
+    }
+
+}
+
+autoQuality();
+
+window.addEventListener("resize",autoQuality);
+
+
+// ======================================================
+// FPS COUNTER
+// ======================================================
+
+let last=performance.now();
+let fps=60;
+
+function updateFPS(){
+
+    const now=performance.now();
+
+    fps=1000/(now-last);
+
+    last=now;
+
+}
+
+setInterval(updateFPS,250);
+
+
+// ======================================================
+// ADAPTIVE PARTICLES
+// ======================================================
+
+function adaptiveRendering(){
+
+    if(fps<45){
+
+        ctx.shadowBlur*=0.92;
+
+    }
+
+}
+
+setInterval(adaptiveRendering,500);
+
+
+// ======================================================
+// FINAL GLOW
+// ======================================================
+
+function drawFinalGlow(){
+
+    ctx.save();
+
+    const g=ctx.createRadialGradient(
+
+        cx,
+        cy,
+        radius*0.15,
+
+        cx,
+        cy,
+        radius*1.05
+
+    );
+
+    g.addColorStop(0,"rgba(255,255,255,0.05)");
+    g.addColorStop(.4,"rgba(255,255,255,0.02)");
+    g.addColorStop(1,"rgba(255,255,255,0)");
+
+    ctx.fillStyle=g;
+
+    ctx.beginPath();
+
+    ctx.arc(cx,cy,radius,0,Math.PI*2);
+
+    ctx.fill();
+
+    ctx.restore();
+
+}
+</script>
+
+</body>
+</html>

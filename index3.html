@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Particle Clock</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: 'Courier New', monospace; cursor: crosshair; }
+  #info {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.4); font-size: 11px; letter-spacing: 0.15em;
+    text-transform: uppercase; pointer-events: none; white-space: nowrap;
+  }
+  #mode {
+    position: fixed; top: 20px; right: 20px;
+    color: rgba(255,255,255,0.5); font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; pointer-events: none;
+  }
+  #clock-text {
+    position: fixed; top: 20px; left: 20px;
+    color: rgba(255,255,255,0.6); font-size: 14px; letter-spacing: 0.2em;
+    pointer-events: none;
+    font-family: 'Courier New', monospace;
+    background: rgba(0,0,0,0.5);
+    padding: 6px 12px;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+</style>
+</head>
+<body>
+<div id="info">hover: attract &nbsp;|&nbsp; click: toggle repel &nbsp;|&nbsp; drag: rotate &nbsp;|&nbsp; scroll: zoom</div>
+<div id="mode">[ ATTRACTOR ]</div>
+<div id="clock-text">00:00:00</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+// ─────────────────────────────────────────────
+//  3D INTERACTIVE PARTICLE CLOCK  v2
+//  Uses PointsMaterial only (no custom shaders)
+//  to avoid WebGL shader compilation errors
+// ─────────────────────────────────────────────
+
+const R = 4.0;          // clock radius
+const RINGS = 38;
+const PTS_PER_RING = 120;
+const INFLUENCE = 1.6;
+const STIFFNESS = 0.06;
+const DAMPING   = 0.80;
+
+// ── Scene setup ──────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000);
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.01, 200);
+camera.position.set(0, 0, 10);
+camera.lookAt(0, 0, 0);
+
+// ── Particle arrays ───────────────────────────
+let positions, velocities, origins, particleCount;
+let particleMesh;
+
+function buildDisk() {
+  const pts = [];
+
+  // center
+  pts.push(0, 0, 0);
+
+  // rings
+  for (let r = 0; r < RINGS; r++) {
+    const t = (r + 1) / (RINGS + 1);
+    const rr = t * R;
+    const count = Math.max(8, Math.round(PTS_PER_RING * Math.sqrt(t)));
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const jx = (Math.random() - 0.5) * 0.04;
+      const jy = (Math.random() - 0.5) * 0.04;
+      pts.push(rr * Math.cos(a) + jx, rr * Math.sin(a) + jy, 0);
+    }
+  }
+
+  // hour markers — bright cluster of dots
+  for (let h = 0; h < 12; h++) {
+    const a = (h / 12) * Math.PI * 2 - Math.PI / 2;
+    const mr = R * 0.9;
+    for (let d = 0; d < 10; d++) {
+      pts.push(
+        mr * Math.cos(a) + (Math.random() - 0.5) * 0.07,
+        mr * Math.sin(a) + (Math.random() - 0.5) * 0.07,
+        0.03
+      );
+    }
+  }
+
+  particleCount = pts.length / 3;
+  positions  = new Float32Array(pts);
+  velocities = new Float32Array(particleCount * 3);
+  origins    = new Float32Array(pts); // copy
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+
+  // PointsMaterial — simple, reliable, no shader issues
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.055,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  particleMesh = new THREE.Points(geo, mat);
+  scene.add(particleMesh);
+}
+
+// ── Clock hands ───────────────────────────────
+let handH, handM, handS;
+const clockGroup = new THREE.Group();
+scene.add(clockGroup);
+
+function buildHands() {
+  const white = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const orange = new THREE.MeshBasicMaterial({ color: 0xff5533 });
+
+  // Hour
+  const hg = new THREE.CylinderGeometry(0.03, 0.01, R * 0.50, 6);
+  hg.translate(0, R * 0.25, 0);
+  handH = new THREE.Mesh(hg, white.clone());
+  handH.position.z = 0.15;
+  clockGroup.add(handH);
+
+  // Minute
+  const mg = new THREE.CylinderGeometry(0.02, 0.005, R * 0.75, 6);
+  mg.translate(0, R * 0.375, 0);
+  handM = new THREE.Mesh(mg, white.clone());
+  handM.position.z = 0.17;
+  clockGroup.add(handM);
+
+  // Second
+  const sg = new THREE.CylinderGeometry(0.008, 0.008, R * 0.85, 6);
+  sg.translate(0, R * 0.425, 0);
+  handS = new THREE.Mesh(sg, orange.clone());
+  handS.position.z = 0.19;
+  clockGroup.add(handS);
+
+  // Center cap
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 10, 10),
+    white.clone()
+  );
+  cap.position.z = 0.2;
+  clockGroup.add(cap);
+}
+
+// ── Time update (FIXED: proper time synchronization) ──
+function updateTime() {
+  // Get current system time
+  const now = new Date();
+  const hours = now.getHours() % 12;
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  const milliseconds = now.getMilliseconds();
+
+  // Calculate total seconds for smooth rotation
+  const totalSeconds = seconds + milliseconds / 1000;
+  const totalMinutes = minutes + totalSeconds / 60;
+  const totalHours = hours + totalMinutes / 60;
+
+  // Convert to radians (12 o'clock = -PI/2, 3 o'clock = 0, 6 o'clock = PI/2, 9 o'clock = PI)
+  // Clock hands rotate clockwise, so we use negative angles
+  const secondAngle = (totalSeconds / 60) * Math.PI * 2;
+  const minuteAngle = (totalMinutes / 60) * Math.PI * 2;
+  const hourAngle = (totalHours / 12) * Math.PI * 2;
+
+  // Apply rotations (negative to rotate clockwise, minus PI/2 to start at 12 o'clock)
+  handS.rotation.z = -(secondAngle - Math.PI / 2);
+  handM.rotation.z = -(minuteAngle - Math.PI / 2);
+  handH.rotation.z = -(hourAngle - Math.PI / 2);
+
+  // Sync clock group tilt with particle disk
+  clockGroup.rotation.x = particleMesh.rotation.x;
+  clockGroup.rotation.y = particleMesh.rotation.y;
+
+  // Update digital clock display
+  const displayHours = String(now.getHours()).padStart(2, '0');
+  const displayMinutes = String(minutes).padStart(2, '0');
+  const displaySeconds = String(seconds).padStart(2, '0');
+  document.getElementById('clock-text').textContent = 
+    displayHours + ':' + displayMinutes + ':' + displaySeconds;
+}
+
+// ── Mouse / interaction state ─────────────────
+const mouse = new THREE.Vector2(-9999, -9999);
+const mouseWorld = new THREE.Vector3(-9999, 0, 0);
+const raycaster = new THREE.Raycaster();
+const hitPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(60, 60),
+  new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+);
+scene.add(hitPlane);
+
+let mode = 'attract'; // 'attract' | 'repel'
+let isDragging = false;
+let dragLast = { x: 0, y: 0 };
+let camTheta = 0, camPhi = Math.PI / 2, camR = 10;
+let targetTheta = 0, targetPhi = Math.PI / 2;
+let autoRotate = true;
+let frame = 0;
+
+function setupInteraction() {
+  window.addEventListener('mousemove', e => {
+    mouse.set(e.clientX, e.clientY);
+    const ndcX =  (e.clientX / innerWidth)  * 2 - 1;
+    const ndcY = -(e.clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+    const hits = raycaster.intersectObject(hitPlane);
+    if (hits.length) mouseWorld.copy(hits[0].point);
+
+    if (isDragging) {
+      targetTheta += (e.clientX - dragLast.x) * 0.007;
+      targetPhi = Math.max(0.25, Math.min(Math.PI - 0.25,
+        targetPhi + (e.clientY - dragLast.y) * 0.007));
+      dragLast = { x: e.clientX, y: e.clientY };
+    } else {
+      // gentle tilt follow
+      const tx = ndcX * 0.38;
+      const ty = ndcY * 0.18;
+      gsap.to(particleMesh.rotation, { x: -ty, y: tx, duration: 1.6, ease: 'power2.out' });
+    }
+  });
+
+  window.addEventListener('mousedown', e => {
+    if (e.button === 0) {
+      mode = mode === 'attract' ? 'repel' : 'attract';
+      const badge = document.getElementById('mode');
+      badge.textContent = mode === 'repel' ? '[ REPELLER ]' : '[ ATTRACTOR ]';
+      badge.style.color = mode === 'repel' ? 'rgba(255,100,50,0.8)' : 'rgba(255,255,255,0.5)';
+    }
+    if (e.button === 2 || e.button === 1) {
+      isDragging = true;
+      dragLast = { x: e.clientX, y: e.clientY };
+    }
+    e.preventDefault();
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+    setTimeout(() => { autoRotate = true; }, 3000);
+  });
+
+  if (isDragging) autoRotate = false;
+
+  window.addEventListener('mouseleave', () => {
+    mouseWorld.set(-9999, 0, 0);
+  });
+
+  window.addEventListener('contextmenu', e => e.preventDefault());
+
+  window.addEventListener('wheel', e => {
+    camR = Math.max(4, Math.min(18, camR + e.deltaY * 0.012));
+  }, { passive: true });
+
+  // Touch
+  let lastT = null;
+  window.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    const ndcX =  (t.clientX / innerWidth)  * 2 - 1;
+    const ndcY = -(t.clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+    const hits = raycaster.intersectObject(hitPlane);
+    if (hits.length) mouseWorld.copy(hits[0].point);
+    if (lastT) {
+      targetTheta += (t.clientX - lastT.x) * 0.007;
+      targetPhi = Math.max(0.25, Math.min(Math.PI - 0.25,
+        targetPhi + (t.clientY - lastT.y) * 0.007));
+    }
+    lastT = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+  window.addEventListener('touchend', () => {
+    lastT = null;
+    mouseWorld.set(-9999, 0, 0);
+  });
+}
+
+// ── Particle physics ──────────────────────────
+function updateParticles() {
+  const pos = particleMesh.geometry.attributes.position;
+  const mx = mouseWorld.x;
+  const my = mouseWorld.y;
+  const active = mx !== -9999;
+  const IR2 = INFLUENCE * INFLUENCE;
+
+  for (let i = 0; i < particleCount; i++) {
+    const i3 = i * 3;
+    const px = positions[i3],   py = positions[i3+1], pz = positions[i3+2];
+    const ox = origins[i3],     oy = origins[i3+1],   oz = origins[i3+2];
+    let   vx = velocities[i3],  vy = velocities[i3+1], vz = velocities[i3+2];
+
+    // Spring toward origin
+    vx += (ox - px) * STIFFNESS;
+    vy += (oy - py) * STIFFNESS;
+    vz += (oz - pz) * STIFFNESS;
+
+    // Mouse force
+    if (active) {
+      const dx = px - mx, dy = py - my;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < IR2 && d2 > 0.0001) {
+        const dist = Math.sqrt(d2);
+        const falloff = (1 - dist / INFLUENCE);
+        const str = falloff * falloff;
+        if (mode === 'repel') {
+          vx += (dx / dist) * str * 3.5;
+          vy += (dy / dist) * str * 3.5;
+          vz += (Math.random() - 0.5) * str * 0.8;
+        } else {
+          vx -= (dx / dist) * str * 2.2;
+          vy -= (dy / dist) * str * 2.2;
+          vz += Math.sin(frame * 0.08 + i * 0.05) * str * 0.25;
+        }
+      }
+    }
+
+    // Bowl warp along Z
+    const dc = Math.sqrt(ox * ox + oy * oy);
+    const warpTarget = oz + Math.sin(dc / R * Math.PI) * 0.4
+                         * Math.sin(frame * 0.003 + dc * 0.25);
+    vz += (warpTarget - pz) * 0.015;
+
+    // Dampen
+    vx *= DAMPING; vy *= DAMPING; vz *= DAMPING;
+
+    // Clamp
+    const maxV = 0.3;
+    vx = Math.max(-maxV, Math.min(maxV, vx));
+    vy = Math.max(-maxV, Math.min(maxV, vy));
+    vz = Math.max(-maxV, Math.min(maxV, vz));
+
+    positions[i3]   = px + vx;
+    positions[i3+1] = py + vy;
+    positions[i3+2] = pz + vz;
+    velocities[i3]  = vx; velocities[i3+1] = vy; velocities[i3+2] = vz;
+  }
+
+  pos.needsUpdate = true;
+}
+
+// ── Camera ────────────────────────────────────
+function updateCamera() {
+  camTheta += (targetTheta - camTheta) * 0.065;
+  camPhi   += (targetPhi   - camPhi)   * 0.065;
+  camera.position.set(
+    camR * Math.sin(camPhi) * Math.sin(camTheta),
+    camR * Math.cos(camPhi),
+    camR * Math.sin(camPhi) * Math.cos(camTheta)
+  );
+  camera.lookAt(0, 0, 0);
+}
+
+// ── Resize ────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ── Animate loop ──────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  frame++;
+
+  if (autoRotate) targetTheta += 0.0011;
+
+  updateCamera();
+  updateParticles();
+  updateTime();
+
+  renderer.render(scene, camera);
+}
+
+// ── Boot ──────────────────────────────────────
+buildDisk();
+buildHands();
+setupInteraction();
+
+// Intro animation
+particleMesh.scale.set(0.01, 0.01, 0.01);
+gsap.to(particleMesh.scale, { x:1, y:1, z:1, duration:2.0, ease:'elastic.out(1, 0.55)', delay:0.1 });
+gsap.to(clockGroup.scale,   { x:1, y:1, z:1, duration:2.0, ease:'elastic.out(1, 0.55)', delay:0.1 });
+clockGroup.scale.set(0.01, 0.01, 0.01);
+
+animate();
+</script>
+</body>
+</html>

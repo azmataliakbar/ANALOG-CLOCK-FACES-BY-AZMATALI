@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Particle Clock</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Tangerine:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            cursor: none;
+            user-select: none;
+        }
+        canvas { display: block; }
+
+        #cursor-indicator {
+            position: fixed;
+            pointer-events: none;
+            width: 50px; height: 50px;
+            border: 1px solid rgba(255,255,255,0.35);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            transition: width 0.3s, height 0.3s, border-color 0.3s;
+        }
+        #cursor-indicator.repel {
+            border-color: rgba(255,80,80,0.6);
+            width: 80px; height: 80px;
+        }
+        #cursor-inner {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #tool-hint {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.5);
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            z-index: 10;
+            pointer-events: none;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .mode-label {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.4);
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            z-index: 10;
+            pointer-events: none;
+            text-transform: uppercase;
+        }
+
+        #clock-title {
+            position: fixed;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Tangerine', 'Cinzel Decorative', 'Georgia', serif;
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffffff;
+            text-shadow: 0 0 20px rgba(255,255,255,0.6), 0 0 40px rgba(255,255,255,0.25), 0 0 80px rgba(255,255,255,0.12);
+            letter-spacing: 0.1em;
+            z-index: 10;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        #signature {
+            position: fixed;
+            bottom: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Tangerine', 'Georgia', serif;
+            font-size: 20px;
+            font-weight: 400;
+            color: rgba(255,255,255,0.55);
+            text-shadow: 0 0 8px rgba(255,255,255,0.45), 0 0 20px rgba(255,255,255,0.15), 0 2px 4px rgba(0,0,0,0.6);
+            letter-spacing: 0.18em;
+            z-index: 10;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        @media (min-width: 500px) {
+            #tool-hint { font-size: 12px; bottom: 42px; }
+            .mode-label { font-size: 11px; top: 30px; right: 40px; }
+            #cursor-indicator { width: 80px; height: 80px; }
+            #cursor-indicator.repel { width: 120px; height: 120px; }
+            #clock-title { font-size: 26px; top: 10px; }
+            #signature { font-size: 26px; bottom: 6px; }
+        }
+
+        @media (min-width: 800px) {
+            #clock-title { font-size: 36px; top: 14px; }
+            #signature { font-size: 30px; bottom: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="clock-title">COSMIC PARTICLE CLOCK</div>
+    <div id="cursor-indicator"><div id="cursor-inner"></div></div>
+    <div id="tool-hint">click to toggle: ATTRACT / REPEL</div>
+    <div class="mode-label" id="mode-label">ATTRACT</div>
+    <div id="signature">Azmat Ali</div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ────────────────────────────────────
+        // CONSTANTS
+        // ────────────────────────────────────
+        const CLOCK_RADIUS = 4.5;
+        const TOTAL_PARTICLES = 8000;
+        const RING_COUNT = 40;
+        const HOUR_MARKER_PARTICLES = 8;
+        const HOUR_MARKER_RADIUS = CLOCK_RADIUS * 0.92;
+        const SCATTER_RADIUS = 2.5;
+        const SPRING_STIFFNESS = 0.08;
+        const SPRING_DAMPING = 0.85;
+        const MOUSE_INFLUENCE_RADIUS = 2.2;
+        const REPEL_STRENGTH = 0.6;
+        const ATTRACT_STRENGTH = 0.4;
+        const WARP_STRENGTH = 1.2;
+
+        // ────────────────────────────────────
+        // STATE
+        // ────────────────────────────────────
+        let scene, camera, renderer;
+        let clockParticles, accentParticles;
+        let hourHand, minuteHand, secondHand;
+        let clockGroup;
+        let anchorPositions, currentPositions, velocities;
+        let mouseNDC = new THREE.Vector2(999, 999);
+        let mouse3D = new THREE.Vector3();
+        let raycaster = new THREE.Raycaster();
+        let interactionMode = 'attract'; // 'attract' | 'repel'
+        let mouseActive = false;
+        let clockTime = { h: 0, m: 0, s: 0, ms: 0 };
+        let targetRotation = { x: 0, y: 0 };
+        let currentRotation = { x: 0, y: 0 };
+
+        // ────────────────────────────────────
+        // DOM ELEMENTS
+        // ────────────────────────────────────
+        const cursorIndicator = document.getElementById('cursor-indicator');
+        const modeLabel = document.getElementById('mode-label');
+
+        // ────────────────────────────────────
+        // Responsive scaling
+        // ────────────────────────────────────
+        const BASE_CAMERA_Z = 11;
+        const CAMERA_FOV = 50;
+        function getResponsiveScale() {
+            const vFov = THREE.MathUtils.degToRad(CAMERA_FOV);
+            const visibleHeight = 2 * BASE_CAMERA_Z * Math.tan(vFov / 2);
+            const aspect = window.innerWidth / window.innerHeight;
+            const visibleWidth = visibleHeight * aspect;
+            const narrower = Math.min(visibleWidth, visibleHeight);
+            const targetDiameter = narrower * 0.70;
+            const scale = targetDiameter / (CLOCK_RADIUS * 2);
+            return Math.max(0.28, Math.min(1, scale));
+        }
+
+        // ────────────────────────────────────
+        // InitScene
+        // ────────────────────────────────────
+        function InitScene() {
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 0.8, 11);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x000000);
+            document.body.appendChild(renderer.domElement);
+
+            // subtle ambient particles floating in background
+            createBackgroundDust();
+
+            clockGroup = new THREE.Group();
+            scene.add(clockGroup);
+
+            applyResponsiveScale();
+
+            window.addEventListener('resize', onResize);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('click', onToggleMode);
+            window.addEventListener('mouseleave', () => { mouseActive = false; });
+            window.addEventListener('mouseenter', () => { mouseActive = true; });
+            window.addEventListener('touchmove', onTouchMove, { passive: false });
+            window.addEventListener('touchstart', onTouchStart);
+            window.addEventListener('touchend', () => { mouseActive = false; });
+        }
+
+        function applyResponsiveScale() {
+            const s = getResponsiveScale();
+            clockGroup.scale.setScalar(s);
+        }
+
+        function createBackgroundDust() {
+            const count = 600;
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                pos[i * 3] = (Math.random() - 0.5) * 30;
+                pos[i * 3 + 1] = (Math.random() - 0.5) * 20;
+                pos[i * 3 + 2] = -3 - Math.random() * 10;
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const mat = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.03,
+                transparent: true,
+                opacity: 0.25,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const dust = new THREE.Points(geo, mat);
+            dust.name = 'backgroundDust';
+            scene.add(dust);
+        }
+
+        // ────────────────────────────────────
+        // CreateClockGeometry
+        // ────────────────────────────────────
+        function CreateClockGeometry() {
+            // Main particle disk
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(TOTAL_PARTICLES * 3);
+            const colors = new Float32Array(TOTAL_PARTICLES * 3);
+            const sizes = new Float32Array(TOTAL_PARTICLES);
+
+            anchorPositions = new Float32Array(TOTAL_PARTICLES * 3);
+            currentPositions = new Float32Array(TOTAL_PARTICLES * 3);
+            velocities = new Float32Array(TOTAL_PARTICLES * 3);
+
+            let idx = 0;
+            for (let r = 0; r < RING_COUNT; r++) {
+                const radius = (r / (RING_COUNT - 1)) * CLOCK_RADIUS * 0.95;
+                const particlesInRing = Math.max(12, Math.floor((r + 1) * 16));
+                const ringPhase = r * 0.05;
+
+                for (let p = 0; p < particlesInRing; p++) {
+                    const angle = (p / particlesInRing) * Math.PI * 2 + ringPhase;
+                    const x = Math.cos(angle) * radius;
+                    const y = Math.sin(angle) * radius;
+                    const z = 0;
+
+                    positions[idx * 3] = x;
+                    positions[idx * 3 + 1] = y;
+                    positions[idx * 3 + 2] = z;
+
+                    anchorPositions[idx * 3] = x;
+                    anchorPositions[idx * 3 + 1] = y;
+                    anchorPositions[idx * 3 + 2] = z;
+
+                    currentPositions[idx * 3] = x;
+                    currentPositions[idx * 3 + 1] = y;
+                    currentPositions[idx * 3 + 2] = z;
+
+                    velocities[idx * 3] = 0;
+                    velocities[idx * 3 + 1] = 0;
+                    velocities[idx * 3 + 2] = 0;
+
+                    // brightness varies with radius
+                    const brightness = 0.55 + (radius / CLOCK_RADIUS) * 0.45;
+                    colors[idx * 3] = brightness;
+                    colors[idx * 3 + 1] = brightness;
+                    colors[idx * 3 + 2] = brightness;
+
+                    sizes[idx] = 0.025 + Math.random() * 0.015;
+
+                    idx++;
+                }
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.04,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.85,
+                sizeAttenuation: true
+            });
+
+            clockParticles = new THREE.Points(geo, mat);
+            clockGroup.add(clockParticles);
+
+            // Hour accent markers
+            createHourMarkers();
+            // Hour digits at 12, 3, 6, 9
+            createHourDigits();
+            // Clock hands
+            createClockHands();
+        }
+
+        function createHourMarkers() {
+            const nonCardinalIndices = [1, 2, 4, 5, 7, 8, 10, 11];
+            const count = nonCardinalIndices.length;
+
+            const markerGeo = new THREE.BufferGeometry();
+            const markerPositions = new Float32Array(count * 3);
+            const markerSizes = new Float32Array(count);
+            const markerColors = new Float32Array(count * 3);
+
+            for (let j = 0; j < count; j++) {
+                const i = nonCardinalIndices[j];
+                const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+                markerPositions[j * 3] = Math.cos(angle) * HOUR_MARKER_RADIUS;
+                markerPositions[j * 3 + 1] = Math.sin(angle) * HOUR_MARKER_RADIUS;
+                markerPositions[j * 3 + 2] = 0.02;
+                markerSizes[j] = 0.12;
+                markerColors[j * 3] = 0.8;
+                markerColors[j * 3 + 1] = 0.8;
+                markerColors[j * 3 + 2] = 0.8;
+            }
+
+            markerGeo.setAttribute('position', new THREE.BufferAttribute(markerPositions, 3));
+            markerGeo.setAttribute('size', new THREE.BufferAttribute(markerSizes, 1));
+            markerGeo.setAttribute('color', new THREE.BufferAttribute(markerColors, 3));
+
+            const markerMat = new THREE.PointsMaterial({
+                size: 0.13,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.9,
+                sizeAttenuation: true
+            });
+
+            accentParticles = new THREE.Points(markerGeo, markerMat);
+            clockGroup.add(accentParticles);
+        }
+
+        function createHourDigits() {
+            const cardinals = [
+                { text: '6',  hour: 0 },
+                { text: '3',  hour: 3 },
+                { text: '12', hour: 6 },
+                { text: '9',  hour: 9 },
+            ];
+
+            for (const { text, hour } of cardinals) {
+                const angle = (hour / 12) * Math.PI * 2 - Math.PI / 2;
+                const x = Math.cos(angle) * HOUR_MARKER_RADIUS;
+                const y = Math.sin(angle) * HOUR_MARKER_RADIUS;
+
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 130px "Segoe UI", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, 128, 128);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.minFilter = THREE.LinearFilter;
+                texture.magFilter = THREE.LinearFilter;
+
+                const spriteMat = new THREE.SpriteMaterial({
+                    map: texture,
+                    transparent: true,
+                    blending: THREE.NormalBlending,
+                    depthWrite: false,
+                    opacity: 0.95
+                });
+
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.position.set(x, y, 0.04);
+                sprite.scale.set(1.0, 1.0, 1);
+                clockGroup.add(sprite);
+            }
+        }
+
+        function createClockHands() {
+            const handMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.9,
+                depthTest: true,
+                depthWrite: true
+            });
+
+            // Hour hand — extends upward from center, pivot at bottom
+            const hourLen = CLOCK_RADIUS * 0.48;
+            const hourGeo = new THREE.BoxGeometry(0.07, hourLen, 0.02);
+            hourGeo.translate(0, hourLen / 2, 0);
+            hourHand = new THREE.Mesh(hourGeo, handMat);
+            hourHand.position.z = 0.08;
+            hourHand.name = 'hourHand';
+
+            // Minute hand
+            const minuteLen = CLOCK_RADIUS * 0.72;
+            const minuteGeo = new THREE.BoxGeometry(0.045, minuteLen, 0.02);
+            minuteGeo.translate(0, minuteLen / 2, 0);
+            minuteHand = new THREE.Mesh(minuteGeo, handMat.clone());
+            minuteHand.position.z = 0.1;
+            minuteHand.name = 'minuteHand';
+
+            // Second hand
+            const secondLen = CLOCK_RADIUS * 0.82;
+            const secondGeo = new THREE.BoxGeometry(0.02, secondLen, 0.015);
+            secondGeo.translate(0, secondLen / 2, 0);
+            const secondMat = new THREE.MeshBasicMaterial({
+                color: 0xff4444,
+                transparent: true,
+                opacity: 0.85,
+                depthTest: true,
+                depthWrite: true
+            });
+            secondHand = new THREE.Mesh(secondGeo, secondMat);
+            secondHand.position.z = 0.12;
+            secondHand.name = 'secondHand';
+
+            // Center cap
+            const capGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.05, 32);
+            const cap = new THREE.Mesh(capGeo, handMat);
+            cap.position.z = 0.14;
+
+            clockGroup.add(hourHand);
+            clockGroup.add(minuteHand);
+            clockGroup.add(secondHand);
+            clockGroup.add(cap);
+        }
+
+        // ────────────────────────────────────
+        // UpdateClockTime
+        // ────────────────────────────────────
+        function UpdateClockTime() {
+            const now = new Date();
+            clockTime.h = now.getHours() % 12;
+            clockTime.m = now.getMinutes();
+            clockTime.s = now.getSeconds();
+            clockTime.ms = now.getMilliseconds();
+
+            // Positive rotation.z in Three.js = CCW in screen space. Clock hands go CW, so negate.
+            secondHand.rotation.z = -(clockTime.s + clockTime.ms / 1000) * (Math.PI * 2 / 60);
+            minuteHand.rotation.z = -(clockTime.m + clockTime.s / 60) * (Math.PI * 2 / 60);
+            hourHand.rotation.z = -(clockTime.h + clockTime.m / 60) * (Math.PI * 2 / 12);
+        }
+
+        // ────────────────────────────────────
+        // HandleUserInteraction
+        // ────────────────────────────────────
+        function HandleUserInteraction() {
+            // Compute the clock face plane in world space (follows clockGroup rotation)
+            const clockNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(clockGroup.quaternion);
+            const clockCenter = new THREE.Vector3();
+            clockGroup.getWorldPosition(clockCenter);
+            const worldPlane = new THREE.Plane(clockNormal, -clockCenter.dot(clockNormal));
+
+            raycaster.setFromCamera(mouseNDC, camera);
+            const intersection = new THREE.Vector3();
+            raycaster.ray.intersectPlane(worldPlane, intersection);
+
+            if (intersection && mouseActive) {
+                // Transform world intersection into clock group local space
+                clockGroup.worldToLocal(intersection);
+                mouse3D.copy(intersection);
+            } else {
+                mouse3D.set(999, 999, 0);
+            }
+
+            const posAttr = clockParticles.geometry.getAttribute('position');
+            const arr = posAttr.array;
+            const influenceSq = MOUSE_INFLUENCE_RADIUS * MOUSE_INFLUENCE_RADIUS;
+
+            for (let i = 0; i < TOTAL_PARTICLES; i++) {
+                const ix = i * 3;
+                const ax = anchorPositions[ix];
+                const ay = anchorPositions[ix + 1];
+
+                // Mouse influence
+                const dx = currentPositions[ix] - mouse3D.x;
+                const dy = currentPositions[ix + 1] - mouse3D.y;
+                const distSq = dx * dx + dy * dy;
+
+                if (mouseActive && distSq < influenceSq && distSq > 0.001) {
+                    const dist = Math.sqrt(distSq);
+                    const force = 1 - dist / MOUSE_INFLUENCE_RADIUS;
+                    const strengthSq = force * force;
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    if (interactionMode === 'repel') {
+                        velocities[ix] += nx * strengthSq * REPEL_STRENGTH;
+                        velocities[ix + 1] += ny * strengthSq * REPEL_STRENGTH;
+                        velocities[ix + 2] += (Math.random() - 0.5) * strengthSq * 0.5;
+                    } else {
+                        velocities[ix] -= nx * strengthSq * ATTRACT_STRENGTH;
+                        velocities[ix + 1] -= ny * strengthSq * ATTRACT_STRENGTH;
+                        velocities[ix + 2] += (Math.random() - 0.5) * strengthSq * 0.3;
+                    }
+                }
+
+                // Spring back to anchor
+                const sx = ax - currentPositions[ix];
+                const sy = ay - currentPositions[ix + 1];
+                const sz = 0 - currentPositions[ix + 2];
+
+                velocities[ix] += sx * SPRING_STIFFNESS;
+                velocities[ix + 1] += sy * SPRING_STIFFNESS;
+                velocities[ix + 2] += sz * SPRING_STIFFNESS;
+
+                // Damping
+                velocities[ix] *= SPRING_DAMPING;
+                velocities[ix + 1] *= SPRING_DAMPING;
+                velocities[ix + 2] *= SPRING_DAMPING;
+
+                // Update position
+                currentPositions[ix] += velocities[ix];
+                currentPositions[ix + 1] += velocities[ix + 1];
+                currentPositions[ix + 2] += velocities[ix + 2];
+
+                // Apply bowl warp based on distance from center
+                const radialDist = Math.sqrt(ax * ax + ay * ay) / CLOCK_RADIUS;
+                const warpZ = -radialDist * radialDist * WARP_STRENGTH * (1 + Math.sin(Date.now() * 0.0005 + radialDist * 3) * 0.08);
+
+                arr[ix] = currentPositions[ix];
+                arr[ix + 1] = currentPositions[ix + 1];
+                arr[ix + 2] = currentPositions[ix + 2] + warpZ;
+            }
+
+            posAttr.needsUpdate = true;
+        }
+
+        // ────────────────────────────────────
+        // Animate
+        // ────────────────────────────────────
+        function Animate() {
+            requestAnimationFrame(Animate);
+
+            UpdateClockTime();
+            HandleUserInteraction();
+
+            // Camera rotation
+            const tx = mouseNDC.y * 0.35;
+            const ty = mouseNDC.x * 0.4;
+
+            targetRotation.x += (tx - targetRotation.x) * 0.03;
+            targetRotation.y += (ty - targetRotation.y) * 0.03;
+
+            // subtle auto-rotation when mouse is away
+            if (!mouseActive) {
+                targetRotation.y += 0.0008;
+            }
+
+            currentRotation.x += (targetRotation.x - currentRotation.x) * 0.05;
+            currentRotation.y += (targetRotation.y - currentRotation.y) * 0.05;
+
+            clockGroup.rotation.x = currentRotation.x;
+            clockGroup.rotation.y = currentRotation.y;
+
+            // Animate background dust
+            const dust = scene.getObjectByName('backgroundDust');
+            if (dust) {
+                dust.rotation.y += 0.0003;
+                dust.rotation.x += 0.0002;
+            }
+
+            // Pulsing accent markers
+            if (accentParticles) {
+                const time = Date.now() * 0.001;
+                const sizeAttr = accentParticles.geometry.getAttribute('size');
+                if (sizeAttr) {
+                    const sArr = sizeAttr.array;
+                    for (let i = 0; i < sArr.length; i++) {
+                        const pulse = 1 + Math.sin(time * 2 + i * 0.5) * 0.25;
+                        sArr[i] = 0.09 * pulse;
+                    }
+                    sizeAttr.needsUpdate = true;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ────────────────────────────────────
+        // EVENT HANDLERS
+        // ────────────────────────────────────
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            applyResponsiveScale();
+        }
+
+        function onMouseMove(e) {
+            updateMousePosition(e.clientX, e.clientY);
+        }
+
+        function onTouchStart(e) {
+            e.preventDefault();
+            updateMousePosition(e.touches[0].clientX, e.touches[0].clientY);
+        }
+
+        function onTouchMove(e) {
+            e.preventDefault();
+            updateMousePosition(e.touches[0].clientX, e.touches[0].clientY);
+        }
+
+        function updateMousePosition(clientX, clientY) {
+            mouseNDC.x = (clientX / window.innerWidth) * 2 - 1;
+            mouseNDC.y = -(clientY / window.innerHeight) * 2 + 1;
+            mouseActive = true;
+            cursorIndicator.style.left = clientX + 'px';
+            cursorIndicator.style.top = clientY + 'px';
+        }
+
+        function onToggleMode() {
+            interactionMode = interactionMode === 'attract' ? 'repel' : 'attract';
+
+            if (interactionMode === 'repel') {
+                cursorIndicator.classList.add('repel');
+                modeLabel.textContent = 'REPEL';
+                modeLabel.style.color = 'rgba(255,80,80,0.6)';
+            } else {
+                cursorIndicator.classList.remove('repel');
+                modeLabel.textContent = 'ATTRACT';
+                modeLabel.style.color = 'rgba(255,255,255,0.4)';
+            }
+        }
+
+        // ────────────────────────────────────
+        // BOOT
+        // ────────────────────────────────────
+        InitScene();
+        CreateClockGeometry();
+        Animate();
+    </script>
+</body>
+</html>

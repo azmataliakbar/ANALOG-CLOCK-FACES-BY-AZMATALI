@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>3D Particle Clock</title>
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; touch-action: none; }
+  body { font-family: 'Courier New', monospace; cursor: crosshair; }
+  canvas { display: block; }
+
+  #info {
+    position: fixed;
+    bottom: clamp(34px, 6vw, 50px);
+    left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.35);
+    font-size: clamp(7px, 1.5vw, 10px);
+    letter-spacing: 0.15em; text-transform: uppercase;
+    pointer-events: none; white-space: nowrap; text-align: center;
+  }
+  @media (max-width: 420px) { .d-hint { display: none; } }
+
+  #mode {
+    position: fixed;
+    top: clamp(10px, 2.5vw, 20px); right: clamp(10px, 2.5vw, 20px);
+    color: rgba(255,255,255,0.5);
+    font-size: clamp(7px, 1.5vw, 10px);
+    letter-spacing: 0.2em; text-transform: uppercase; pointer-events: none;
+  }
+
+  #clock-text {
+    position: fixed;
+    top: clamp(10px, 2.5vw, 20px); left: clamp(10px, 2.5vw, 20px);
+    color: rgba(255,255,255,0.4);
+    font-size: clamp(8px, 1.8vw, 11px);
+    letter-spacing: 0.16em; pointer-events: none; line-height: 1.65;
+  }
+  #clock-text .hms {
+    font-size: clamp(12px, 3.2vw, 18px);
+    font-weight: bold; letter-spacing: 0.12em;
+    color: rgba(255,255,255,0.6);
+  }
+  #clock-text .dmy { opacity: 0.6; margin-top: 2px; font-size: clamp(7px, 1.4vw, 10px); }
+
+  #signature {
+    position: fixed;
+    bottom: clamp(10px, 2vw, 15px); left: 50%; transform: translateX(-50%);
+    font-family: 'Dancing Script', cursive;
+    font-size: clamp(13px, 3.5vw, 22px);
+    color: rgba(255,255,255,0.25);
+    pointer-events: none; white-space: nowrap;
+    text-shadow: 0 0 14px rgba(255,255,255,0.1);
+  }
+</style>
+</head>
+<body>
+
+<div id="info">
+  hover: attract
+  <span class="d-hint">&nbsp;|&nbsp; click: repel &nbsp;|&nbsp; drag: tilt &nbsp;|&nbsp; scroll: zoom</span>
+</div>
+<div id="mode">[ ATTRACTOR ]</div>
+<div id="clock-text">
+  <div class="hms">00:00:00</div>
+  <div class="dmy"></div>
+</div>
+<div id="signature">Azmat Ali</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   3D PARTICLE CLOCK  — Bug-Fixed Edition
+   
+   ROOT CAUSE OF ANTI-CLOCKWISE BUG (now fixed):
+   Previous code orbited the CAMERA 360° around the scene.
+   Once camera passed 180° it viewed clock from BEHIND,
+   making clockwise hands appear counter-clockwise.
+   
+   FIX: Camera is FIXED at +Z. All tilt/rotation is applied
+   to the clock GROUP (mesh + hands together), never the camera.
+   This guarantees hands always move clockwise from viewer POV.
+   
+   TIME SYNC: Uses Date() every frame — exact device clock,
+   millisecond smooth interpolation on all hands.
+═══════════════════════════════════════════════════════════ */
+
+// ── Responsive scale ──────────────────────────────────────
+function getScale() {
+  const s = Math.min(window.innerWidth, window.innerHeight);
+  if (s <= 270)  return 0.36;
+  if (s <= 380)  return 0.36 + (s-270)/110 * 0.18;
+  if (s <= 600)  return 0.54 + (s-380)/220 * 0.26;
+  if (s <= 900)  return 0.80 + (s-600)/300 * 0.22;
+  if (s <= 1400) return 1.02 + (s-900)/500 * 0.18;
+  return 1.25;
+}
+let SC = getScale();
+
+// ── Constants ─────────────────────────────────────────────
+const BASE_R       = 4.0;
+const RINGS        = 38;
+const PTS_PER_RING = 120;
+const STIFFNESS    = 0.06;
+const DAMPING      = 0.80;
+const INFLUENCE_B  = 1.6;
+
+// ── Renderer ─────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000);
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+// Camera FIXED — never moves. Only the clockGroup rotates.
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 200);
+// Camera always at +Z looking at origin → clock face always faces viewer
+function setCameraZ() {
+  camera.position.set(0, 0, 10 * SC);
+  camera.lookAt(0, 0, 0);
+}
+setCameraZ();
+
+// ── Master group — rotates instead of camera ──────────────
+// Everything (disk + hands) lives inside this group.
+// Rotating this group = clock tilts, but face always toward viewer.
+const masterGroup = new THREE.Group();
+scene.add(masterGroup);
+
+// Target tilt angles (smooth lerp toward these)
+let tiltX = 0, tiltY = 0;       // current tilt
+let targetTiltX = 0, targetTiltY = 0;
+// Auto-wobble: gentle Y sway (small angle only — never flips behind)
+let autoWobbleT = 0;
+
+// ── Particle state ────────────────────────────────────────
+let positions, velocities, origins, particleCount, particleMesh;
+
+function buildDisk() {
+  const R   = BASE_R * SC;
+  const pts = [];
+
+  pts.push(0, 0, 0); // center
+
+  for (let r = 0; r < RINGS; r++) {
+    const t  = (r+1)/(RINGS+1);
+    const rr = t * R;
+    const count = Math.max(8, Math.round(PTS_PER_RING * Math.sqrt(t)));
+    for (let i = 0; i < count; i++) {
+      const a  = (i/count) * Math.PI * 2;
+      const jx = (Math.random()-0.5) * 0.04 * SC;
+      const jy = (Math.random()-0.5) * 0.04 * SC;
+      pts.push(rr*Math.cos(a)+jx, rr*Math.sin(a)+jy, 0);
+    }
+  }
+
+  // Hour markers at clock edge
+  for (let h = 0; h < 12; h++) {
+    const a  = (h/12) * Math.PI*2 - Math.PI/2; // start at 12, go CW
+    const mr = R * 0.9;
+    for (let d = 0; d < 10; d++) {
+      pts.push(
+        mr*Math.cos(a) + (Math.random()-0.5)*0.07*SC,
+        mr*Math.sin(a) + (Math.random()-0.5)*0.07*SC,
+        0.03*SC
+      );
+    }
+  }
+
+  particleCount = pts.length/3;
+  positions  = new Float32Array(pts);
+  velocities = new Float32Array(particleCount*3);
+  origins    = new Float32Array(pts);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.055 * SC,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  particleMesh = new THREE.Points(geo, mat);
+  masterGroup.add(particleMesh); // ← inside masterGroup
+}
+
+// ── Clock hands ────────────────────────────────────────────
+let handH, handM, handS;
+const handsGroup = new THREE.Group(); // separate sub-group for hands
+
+function buildHands() {
+  while (handsGroup.children.length) handsGroup.remove(handsGroup.children[0]);
+
+  const R   = BASE_R * SC;
+  const wht = () => new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const red = () => new THREE.MeshBasicMaterial({ color: 0xff5533 });
+
+  // Hour hand — thick, short
+  const hg = new THREE.CylinderGeometry(0.030*SC, 0.010*SC, R*0.50, 8);
+  hg.translate(0, R*0.25, 0);         // pivot at bottom (origin), tip at top
+  handH = new THREE.Mesh(hg, wht());
+  handH.position.z = 0.15*SC;
+  handsGroup.add(handH);
+
+  // Minute hand — medium, longer
+  const mg = new THREE.CylinderGeometry(0.018*SC, 0.005*SC, R*0.75, 8);
+  mg.translate(0, R*0.375, 0);
+  handM = new THREE.Mesh(mg, wht());
+  handM.position.z = 0.17*SC;
+  handsGroup.add(handM);
+
+  // Second hand — thin, longest, red
+  const sg = new THREE.CylinderGeometry(0.007*SC, 0.007*SC, R*0.86, 6);
+  sg.translate(0, R*0.43, 0);
+  handS = new THREE.Mesh(sg, red());
+  handS.position.z = 0.19*SC;
+  handsGroup.add(handS);
+
+  // Second hand tail (counterweight behind center)
+  const tg = new THREE.CylinderGeometry(0.007*SC, 0.007*SC, R*0.20, 6);
+  tg.translate(0, -R*0.10, 0);
+  const tail = new THREE.Mesh(tg, red());
+  tail.position.z = 0.19*SC;
+  handsGroup.add(tail);
+  handS.userData.tail = tail; // keep ref so we can rotate tail same as sec hand
+
+  // Center cap
+  handsGroup.add(new THREE.Mesh(
+    new THREE.SphereGeometry(0.08*SC, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  ));
+
+  masterGroup.add(handsGroup); // ← also inside masterGroup
+}
+
+// ── Time sync ──────────────────────────────────────────────
+// Uses device Date() — exact local time, updated every frame.
+// Hand angle formula:
+//   - Cylinder geometry points UP (+Y) → rotation.z=0 means 12 o'clock
+//   - CLOCKWISE on screen = NEGATIVE rotation.z (Three.js right-hand Z+ toward viewer)
+//   - Formula: angle = -(fraction_of_full_circle) × 2π
+//   - NO offset subtracted — zero IS 12 o'clock already
+const DAYS   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function updateTime() {
+  const d   = new Date();          // exact device local time
+  const h24 = d.getHours();
+  const m   = d.getMinutes();
+  const s   = d.getSeconds();
+  const ms  = d.getMilliseconds();
+  const h12 = h24 % 12;
+
+  // Smooth continuous angles — sub-second interpolation via ms
+  const secA  = -( (s  + ms/1000)           / 60 ) * Math.PI * 2;
+  const minA  = -( (m  + (s + ms/1000)/60)  / 60 ) * Math.PI * 2;
+  const hourA = -( (h12 + m/60 + s/3600)    / 12 ) * Math.PI * 2;
+
+  handH.rotation.z = hourA;
+  handM.rotation.z = minA;
+  handS.rotation.z = secA;
+  if (handS.userData.tail) handS.userData.tail.rotation.z = secA;
+
+  // Digital readout
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  document.querySelector('.hms').textContent =
+    String(h24).padStart(2,'0') + ':' +
+    String(m).padStart(2,'0')   + ':' +
+    String(s).padStart(2,'0')   + ' ' + ampm;
+  document.querySelector('.dmy').textContent =
+    DAYS[d.getDay()] + '  ' +
+    String(d.getDate()).padStart(2,'0') + ' ' +
+    MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+// ── Mouse / touch interaction ─────────────────────────────
+const mouseWorld = new THREE.Vector3(-9999, 0, 0);
+const raycaster  = new THREE.Raycaster();
+
+// Invisible hit plane (in scene space, not masterGroup — so always axis-aligned)
+const hitPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+);
+scene.add(hitPlane);
+
+let mode       = 'attract';
+let isDragging = false;
+let dragLast   = { x:0, y:0 };
+let zoomDist   = 10 * SC;
+let frame      = 0;
+
+function projectMouse(cx, cy) {
+  const nx =  (cx/innerWidth)  * 2 - 1;
+  const ny = -(cy/innerHeight) * 2 + 1;
+  raycaster.setFromCamera({ x:nx, y:ny }, camera);
+  const hits = raycaster.intersectObject(hitPlane);
+  if (hits.length) mouseWorld.copy(hits[0].point);
+  return { nx, ny };
+}
+
+function setMode(m) {
+  mode = m;
+  const b = document.getElementById('mode');
+  b.textContent = m === 'repel' ? '[ REPELLER ]' : '[ ATTRACTOR ]';
+  b.style.color = m === 'repel' ? 'rgba(255,110,50,0.9)' : 'rgba(255,255,255,0.5)';
+}
+
+function setupInteraction() {
+  // Mouse move — tilt masterGroup toward mouse
+  window.addEventListener('mousemove', e => {
+    const { nx, ny } = projectMouse(e.clientX, e.clientY);
+
+    if (isDragging) {
+      // Drag: directly set tilt targets
+      targetTiltY += (e.clientX - dragLast.x) * 0.006;
+      targetTiltX -= (e.clientY - dragLast.y) * 0.006;
+      // Clamp tilt so clock never flips to show its back face
+      targetTiltY = Math.max(-Math.PI*0.45, Math.min(Math.PI*0.45, targetTiltY));
+      targetTiltX = Math.max(-Math.PI*0.30, Math.min(Math.PI*0.30, targetTiltX));
+      dragLast = { x:e.clientX, y:e.clientY };
+    } else {
+      // Hover: gentle responsive tilt (clamped to safe range)
+      targetTiltY = nx * 0.38;
+      targetTiltX = -ny * 0.22;
+    }
+  });
+
+  window.addEventListener('mousedown', e => {
+    if (e.button === 0) setMode(mode === 'attract' ? 'repel' : 'attract');
+    if (e.button === 2 || e.button === 1) {
+      isDragging = true;
+      dragLast = { x:e.clientX, y:e.clientY };
+    }
+    e.preventDefault();
+  });
+
+  window.addEventListener('mouseup', () => { isDragging = false; });
+  window.addEventListener('mouseleave', () => { mouseWorld.set(-9999,0,0); });
+  window.addEventListener('contextmenu', e => e.preventDefault());
+
+  // Scroll zoom
+  window.addEventListener('wheel', e => {
+    zoomDist = Math.max(3*SC, Math.min(20*SC, zoomDist + e.deltaY * 0.014));
+  }, { passive: true });
+
+  // Touch
+  let lastT=null, tStart=0, tMoved=false;
+  window.addEventListener('touchstart', e => {
+    tStart=Date.now(); tMoved=false;
+    lastT={ x:e.touches[0].clientX, y:e.touches[0].clientY };
+  }, { passive:true });
+
+  window.addEventListener('touchmove', e => {
+    tMoved=true;
+    const t=e.touches[0];
+    projectMouse(t.clientX, t.clientY);
+    if (lastT) {
+      targetTiltY += (t.clientX - lastT.x) * 0.006;
+      targetTiltX -= (t.clientY - lastT.y) * 0.006;
+      targetTiltY  = Math.max(-Math.PI*0.45, Math.min(Math.PI*0.45, targetTiltY));
+      targetTiltX  = Math.max(-Math.PI*0.30, Math.min(Math.PI*0.30, targetTiltX));
+    }
+    lastT={ x:t.clientX, y:t.clientY };
+  }, { passive:true });
+
+  window.addEventListener('touchend', () => {
+    if (!tMoved && Date.now()-tStart < 250) setMode(mode==='attract'?'repel':'attract');
+    lastT=null;
+    mouseWorld.set(-9999,0,0);
+  });
+}
+
+// ── Particle physics (same as v2) ─────────────────────────
+function updateParticles() {
+  const pos      = particleMesh.geometry.attributes.position;
+  const INFLUENCE = INFLUENCE_B * SC;
+  const IR2      = INFLUENCE * INFLUENCE;
+  const mx       = mouseWorld.x;
+  const my       = mouseWorld.y;
+  const active   = mx !== -9999;
+
+  for (let i=0; i<particleCount; i++) {
+    const i3 = i*3;
+    const px=positions[i3],  py=positions[i3+1], pz=positions[i3+2];
+    const ox=origins[i3],    oy=origins[i3+1],   oz=origins[i3+2];
+    let   vx=velocities[i3], vy=velocities[i3+1], vz=velocities[i3+2];
+
+    // Spring toward origin
+    vx += (ox-px)*STIFFNESS;
+    vy += (oy-py)*STIFFNESS;
+    vz += (oz-pz)*STIFFNESS;
+
+    // Mouse force
+    if (active) {
+      const dx=px-mx, dy=py-my;
+      const d2=dx*dx+dy*dy;
+      if (d2<IR2 && d2>0.0001) {
+        const dist=Math.sqrt(d2);
+        const str=Math.pow(1-dist/INFLUENCE, 2);
+        if (mode==='repel') {
+          vx+=(dx/dist)*str*3.5*SC; vy+=(dy/dist)*str*3.5*SC;
+          vz+=(Math.random()-0.5)*str*0.8*SC;
+        } else {
+          vx-=(dx/dist)*str*2.2*SC; vy-=(dy/dist)*str*2.2*SC;
+          vz+=Math.sin(frame*0.08+i*0.05)*str*0.25*SC;
+        }
+      }
+    }
+
+    // Bowl warp
+    const dc=Math.sqrt(ox*ox+oy*oy);
+    const warpT=oz+Math.sin(dc/(BASE_R*SC)*Math.PI)*0.4*SC*Math.sin(frame*0.003+dc*0.25);
+    vz+=(warpT-pz)*0.015;
+
+    // Dampen & clamp
+    vx*=DAMPING; vy*=DAMPING; vz*=DAMPING;
+    const mv=0.3*SC;
+    positions[i3]  =px+(vx=Math.max(-mv,Math.min(mv,vx)));
+    positions[i3+1]=py+(vy=Math.max(-mv,Math.min(mv,vy)));
+    positions[i3+2]=pz+(vz=Math.max(-mv,Math.min(mv,vz)));
+    velocities[i3]=vx; velocities[i3+1]=vy; velocities[i3+2]=vz;
+  }
+  pos.needsUpdate=true;
+}
+
+// ── Resize ────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  SC = getScale();
+  zoomDist = 10 * SC;
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  setCameraZ();
+  // Rebuild geometry at new scale
+  masterGroup.remove(particleMesh);
+  particleMesh.geometry.dispose();
+  particleMesh.material.dispose();
+  buildDisk();
+  buildHands();
+});
+
+// ── Animate ───────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  frame++;
+
+  // Auto-wobble: gentle Y oscillation — NEVER full rotation
+  // max ±18° so clock face always toward viewer
+  autoWobbleT += 0.0008;
+  const wobbleY = Math.sin(autoWobbleT) * 0.32;
+  const wobbleX = Math.sin(autoWobbleT * 0.7 + 1.2) * 0.10;
+
+  // If dragging, use drag targets; otherwise use hover+wobble
+  if (!isDragging) {
+    targetTiltY = wobbleY + (targetTiltY - wobbleY) * 0.95;
+    targetTiltX = wobbleX + (targetTiltX - wobbleX) * 0.95;
+  }
+
+  // Smooth lerp masterGroup rotation
+  tiltX += (targetTiltX - tiltX) * 0.055;
+  tiltY += (targetTiltY - tiltY) * 0.055;
+  masterGroup.rotation.x = tiltX;
+  masterGroup.rotation.y = tiltY;
+
+  // Zoom: move camera along Z
+  camera.position.z += (zoomDist - camera.position.z) * 0.08;
+  camera.lookAt(0, 0, 0);
+
+  updateParticles();
+  updateTime();
+  renderer.render(scene, camera);
+}
+
+// ── Boot ──────────────────────────────────────────────────
+buildDisk();
+buildHands();
+setupInteraction();
+
+// Entrance animation
+masterGroup.scale.set(0.01, 0.01, 0.01);
+gsap.to(masterGroup.scale, { x:1, y:1, z:1, duration:2.2, ease:'elastic.out(1,0.55)', delay:0.1 });
+
+animate();
+</script>
+</body>
+</html>
